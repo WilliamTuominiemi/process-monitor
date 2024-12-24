@@ -12,6 +12,8 @@ struct ProcessInfo
 {
     string name;
     int pid;
+    string state;
+    long memoryUsage;
 };
 
 vector<ProcessInfo> getRunningProcesses()
@@ -33,20 +35,41 @@ vector<ProcessInfo> getRunningProcesses()
             int pid = stoi(entry->d_name);
 
             string cmdlinePath = "/proc/" + to_string(pid) + "/cmdline";
+            string statusPath = "/proc/" + to_string(pid) + "/status";
+
             ifstream cmdlineFile(cmdlinePath);
+            ifstream statusFile(statusPath);
+
+            string cmdline, state;
+            long memoryUsage = 0;
 
             if (cmdlineFile.is_open())
             {
-                string cmdline;
                 getline(cmdlineFile, cmdline);
                 cmdlineFile.close();
-
                 replace(cmdline.begin(), cmdline.end(), '\0', ' ');
+            }
 
-                if (!cmdline.empty())
+            if (statusFile.is_open())
+            {
+                string line;
+                while (getline(statusFile, line))
                 {
-                    processes.push_back({cmdline, pid});
+                    if (line.find("State:") == 0)
+                    {
+                        state = line.substr(line.find(":") + 2);
+                    }
+                    else if (line.find("VmRSS:") == 0)
+                    {
+                        memoryUsage = stol(line.substr(line.find(":") + 2));
+                    }
                 }
+                statusFile.close();
+            }
+
+            if (!cmdline.empty())
+            {
+                processes.push_back({cmdline, pid, state, memoryUsage});
             }
         }
     }
@@ -68,7 +91,11 @@ int main()
         {
             short_name = process.name.substr(pos);
         }
-        cout << "PID: " << process.pid << ", Name: " << short_name << endl;
+
+        cout << "PID: " << process.pid
+             << ", Name: " << short_name
+             << ", State: " << process.state
+             << ", Memory Usage: " << process.memoryUsage << " kB" << endl;
     }
 
     return 0;
