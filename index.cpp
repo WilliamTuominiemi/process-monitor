@@ -14,7 +14,22 @@ struct ProcessInfo
     int pid;
     string state;
     long memoryUsage;
+    long cpuUsage;
 };
+
+long getSystemUptime()
+{
+    ifstream uptimeFile("/proc/uptime");
+    if (!uptimeFile.is_open())
+    {
+        cerr << "Error opening /proc/uptime" << endl;
+        return -1;
+    }
+    double systemUptime = 0.0;
+    uptimeFile >> systemUptime;
+    uptimeFile.close();
+    return systemUptime;
+}
 
 vector<ProcessInfo> getRunningProcesses()
 {
@@ -36,12 +51,18 @@ vector<ProcessInfo> getRunningProcesses()
 
             string cmdlinePath = "/proc/" + to_string(pid) + "/cmdline";
             string statusPath = "/proc/" + to_string(pid) + "/status";
+            string statPath = "/proc/" + to_string(pid) + "/stat";
+            string uptimePath = "/proc/uptime";
 
             ifstream cmdlineFile(cmdlinePath);
             ifstream statusFile(statusPath);
+            ifstream statFile(statPath);
+            ifstream uptimeFile(uptimePath);
 
             string cmdline, state;
-            long memoryUsage = 0;
+            long memoryUsage = 0, userTime = 0, kernelTime = 0, startTime = 0, systemUptime = 0, cpuUsage = 0;
+
+            systemUptime = getSystemUptime();
 
             if (cmdlineFile.is_open())
             {
@@ -67,9 +88,41 @@ vector<ProcessInfo> getRunningProcesses()
                 statusFile.close();
             }
 
-            if (!cmdline.empty())
+            if (statFile.is_open())
             {
-                processes.push_back({cmdline, pid, state, memoryUsage});
+                string line;
+                getline(statFile, line);
+                statFile.close();
+
+                vector<string> fields;
+                size_t pos = 0;
+                while ((pos = line.find(" ")) != string::npos)
+                {
+                    fields.push_back(line.substr(0, pos));
+                    line.erase(0, pos + 1);
+                }
+
+                if (fields.size() > 21)
+                {
+                    userTime = stol(fields[13]);
+                    kernelTime = stol(fields[14]);
+                    startTime = stol(fields[21]);
+                }
+
+                long hertz = sysconf(_SC_CLK_TCK);
+                double processCPUTime = (userTime + kernelTime) / (double)hertz;
+                double elapsedTime = systemUptime - (startTime / (double)hertz);
+
+                if (elapsedTime > 0)
+                {
+                    int numCPUs = sysconf(_SC_NPROCESSORS_ONLN);
+                    cpuUsage = (processCPUTime / elapsedTime) * 100.0 / numCPUs;
+                }
+            }
+
+            if (!cmdline.empty() && cpuUsage > 0)
+            {
+                processes.push_back({cmdline, pid, state, memoryUsage, cpuUsage});
             }
         }
     }
@@ -95,7 +148,9 @@ int main()
         cout << "PID: " << process.pid
              << ", Name: " << short_name
              << ", State: " << process.state
-             << ", Memory Usage: " << process.memoryUsage << " kB" << endl;
+             << ", Memory Usage: " << process.memoryUsage << " kB"
+             << ", CPU Usage: " << process.cpuUsage << " %"
+             << endl;
     }
 
     return 0;
